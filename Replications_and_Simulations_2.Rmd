@@ -1,0 +1,232 @@
+---
+title: "R-Replications and Simulations-2"
+output: html_notebook
+---
+This program replicates the bounds indicated at the tops of Figures 2.7. from ``Using Instrumental Variables for Inference about Policy Relevant Treatment Parameters'' (2018, Econometrica) by Mogstad, Santos and Torgovitsky,
+
+As a exercise I replicate the analysis using matrix algebra instead of packaged commands.
+
+While the optimization runs under the specification provided, the results do not match.
+
+Author: Zachary Tausanovitch 
+
+
+```{r Setup, message=FALSE, warning=FALSE}
+
+################################################################################
+# Setup ########################################################################
+################################################################################
+
+set.seed(1162019)
+setwd(
+  'C:\\Users\\ztaus\\Dropbox\\Personal\\Programming\\R-Replications and Simulations-1'
+)
+
+# load in packages
+package_list <- c("foreign", 
+                  "MASS",
+                  "matrixcalc",
+                  "ggplot2",
+                  "tidyverse",
+                  "kableExtra",
+                  "magick",
+                  "gurobi")
+invisible(lapply(package_list, library, character.only = TRUE))
+
+```
+
+
+```{r Functions}
+################################################################################
+# Functions ####################################################################
+################################################################################
+
+# build a function to calculate the values of the polynomials over the support using the relevant weights 
+# Will define the weights below
+bernstein_output <- function(lb,ub, fun,weightfn){
+  Z<-0
+  z0<- c(PZ_0 * weightfn(Z) * integrate(fun,0,p_0)[[1]], PZ_0 * weightfn(Z) * 
+    integrate(fun,p_0,1)[[1]])
+  Z<-1
+  z1<- c(PZ_1 * weightfn(Z) * integrate(fun,0,p_1)[[1]], PZ_1 * weightfn(Z) * 
+    integrate(fun,p_1,1)[[1]])
+  Z<-2
+  z2<- c(PZ_2 * weightfn(Z) * integrate(fun,0,p_2)[[1]], PZ_2 * weightfn(Z) * 
+    integrate(fun,p_2,1)[[1]])
+  
+  answer <- z0 + z1 + z2
+  return(answer)
+}
+
+# Define Berstein Polynomials as functions
+m11<- function(u){(1-u)^2}
+m12<- function(u){2*u*(1-u)}
+m13<- function(u){(u)^2}
+m01<- function(u){(1-u)^2}
+m02<- function(u){2*u*(1-u)}
+m03<- function(u){(u)^2}
+
+
+# Another function for the OLS based optimization
+bernstein_output_OLS <- function(lb,ub, fun,weightfn){
+  D<-0
+  d0<- c(PD_0 * weightfn(D) * integrate(fun,0,PD_0)[[1]], PD_0 * weightfn(D) * 
+    integrate(fun,PD_0,1)[[1]])
+  D<-1
+  d1<- c(PD_1 * weightfn(D) * integrate(fun,0,PD_1)[[1]], PD_1 * weightfn(D) * 
+    integrate(fun,PD_1,1)[[1]])
+  
+  answer <- d0 + d1
+  return(answer)
+}
+
+
+# Define the Gurobi Equation Optimization Algorithm
+# While there are built-in functions, this software
+# is faster.
+gurobi_fun <- function(A,obj,modsense,rhs,sense,lb,ub){
+
+# follow the online instructions, 
+  #with some small modifications for our implementation
+model <- list()
+model$A          <- A 
+model$obj        <- matrix(obj, nrow=1, ncol=6, byrow = T)
+model$modelsense <- modsense
+model$rhs        <- rhs
+model$sense     <- sense
+# Set parameter bounds 
+model$lb       <- lb
+model$ub       <- ub
+
+params <- list(OutputFlag=1)
+
+result <- gurobi(model, params)
+
+print('Solution:')
+print(result$objval)
+print(result$x)
+
+rm(model, result, params)
+
+}
+
+```
+
+
+
+```{r Data}
+################################################################################
+# Data #########################################################################
+################################################################################
+
+# As this is a simuuation, no data is required
+```
+
+
+################################################################################
+ Analysis ######################################################################
+################################################################################
+
+
+
+```{r Question 5}
+#Building the equation
+
+# list what we know and can easily calculate
+PD_0 <- .515
+PD_1 <- .485
+
+PZ_0 <- .5
+PZ_1 <- .4
+PZ_2 <- .1
+
+p_0 <- .35
+p_1 <- .6
+p_2 <- .7
+
+# Covariance calculation for OLS
+print(((1-.485)^2*.485 + (0-.485)^2*.515))
+
+# Calculate the weights (only the z and d are dependent)
+IVweight <-  function(z) {(z-.6)/.089}
+OLSweight <- function(d) {(d-.485)/.249775}
+
+# Claculate and bind the outputs for the constraints
+constraint_IV<- c(
+bernstein_output(0,1,m01,weightfn=IVweight)[1],
+bernstein_output(0,1,m02,weightfn=IVweight)[1],
+bernstein_output(0,1,m03,weightfn=IVweight)[1],
+bernstein_output(0,1,m01,weightfn=IVweight)[2],
+bernstein_output(0,1,m02,weightfn=IVweight)[2],
+bernstein_output(0,1,m03,weightfn=IVweight)[2])
+
+constraint_OLS<- c(
+bernstein_output_OLS(0,1,m01,weightfn=OLSweight)[1],
+bernstein_output_OLS(0,1,m02,weightfn=OLSweight)[1],
+bernstein_output_OLS(0,1,m03,weightfn=OLSweight)[1],
+bernstein_output_OLS(0,1,m01,weightfn=OLSweight)[2],
+bernstein_output_OLS(0,1,m02,weightfn=OLSweight)[2],
+bernstein_output_OLS(0,1,m03,weightfn=OLSweight)[2])
+
+# Calculate and bind the objective function
+obj1 <- integrate(m11,lower = 0.35, upper = 0.9)[[1]]*(1/(.9-.35))
+obj2 <- integrate(m12,lower = 0.35, upper = 0.9)[[1]]*(1/(.9-.35))
+obj3 <- integrate(m13,lower = 0.35, upper = 0.9)[[1]]*(1/(.9-.35))
+obj4 <- integrate(m01,lower = 0.35, upper = 0.9)[[1]]*(-1/(.9-.35))
+obj5 <- integrate(m02,lower = 0.35, upper = 0.9)[[1]]*(-1/(.9-.35))
+obj6 <- integrate(m03,lower = 0.35, upper = 0.9)[[1]]*(-1/(.9-.35))
+objective <- cbind(obj1,obj2,obj3,obj4,obj5,obj6)
+# Observe, how pretty. 
+objective
+
+# Insert the values we need 
+EZ <- .6
+cov_dz <- 0.089
+
+# Use true theta to check that our constraints are correctly specified
+true_theta <- c(0.75,0.5,0.25,0.6,0.4,0.3)
+t(as.matrix(true_theta)) %*% as.matrix(constraint_IV)
+t(as.matrix(true_theta)) %*% as.matrix(constraint_OLS)
+
+# Specify all the different possible bounds
+MTRconst  <- rbind(c(1,1,1,-1,-1,-1), c(1,1,1,-1,-1,-1))
+MONOconst <- rbind(c(-1,1,0,0,0,0), c(0,-1,1,0,0,0), 
+                    c(0,0,0,-1,1,0),c(0,0,0,0,-1,1))
+CONCconst <- rbind(c(1,-2,1,0,0,0), c(0,0,0,1,-2,1))
+
+
+# Collect the constraints we are using 
+constraints_IV<- rbind(t(as.matrix(constraint_IV)),MTRconst,MONOconst,CONCconst)
+constraints_IVOLS<- rbind(t(as.matrix(constraint_IV)),
+  t(as.matrix(constraint_OLS)),MTRconst,MONOconst,CONCconst)
+constraints_dec<- rbind(t(as.matrix(constraint_IV)),
+  t(as.matrix(constraint_OLS)),MTRconst,MONOconst,CONCconst)
+
+# relevant "true" values that will constrain us. 
+beta_IV = 0.074
+beta_OLS = 0.253
+
+# collect bindings & direction they are bound 
+rhsIV<- c(beta_IV,0,1, 0 ,0, 0, 0, 0, 0)
+rhsIVOLS<- c(beta_IV,beta_OLS,0,1, 0 ,0, 0, 0, 0, 0)
+senseIV       <- c('=','>=','<=', '<=', '<=', '<=','<=','<=','<=')
+senseIVOLS     <- c('=','=','>=','<=', '<=', '<=', '<=','<=','<=','<=')
+
+# use gurobi to optimize 
+gurobi_fun(A=constraints_IV,obj=objective,modsense="max",rhs=rhsIV,
+  sense=senseIV,lb=0,ub=1)
+gurobi_fun(A=constraints_IV,obj=objective,modsense="min",rhs=rhsIV,
+  sense=senseIV,lb=0,ub=1)
+
+# Figure 2
+print("IV")
+gurobi_fun(A=constraints_IVOLS,obj=objective,modsense="max",rhs=rhsIVOLS,
+  sense=senseIVOLS,lb=0,ub=1)
+
+# Figure 3
+print("IV & OLS")
+gurobi_fun(A=constraints_IVOLS,obj=objective,modsense="min",rhs=rhsIVOLS,
+  sense=senseIVOLS,lb=0,ub=1)
+
+
+```
